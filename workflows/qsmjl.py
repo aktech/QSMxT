@@ -51,13 +51,31 @@ def qsm_workflow(run_args, mn_inputs, name):
                 (mn_romeo, mn_outputs, [('out_file', 'unwrapped_phase')]),
                 (mn_romeo, mn_unwrapping, [('out_file', 'unwrapped_phase')])
             ])
+        if run_args.unwrapping_algorithm == 'romeob0':
+            mn_romeo = Node(
+                interface=romeo.RomeoB0Interface(),
+                name='mrt_romeo'
+            )
+            wf.connect([
+                (mn_inputs, mn_romeo, [('phase', 'phase'), ('magnitude', 'mag'), ('TE', 'TE')]),
+                (mn_romeo, mn_outputs, [('out_file', 'unwrapped_phase')]),
+                (mn_romeo, mn_unwrapping, [('out_file', 'unwrapped_phase')])
+            ])
+
+    mn_frequency = MapNode(
+        interface=IdentityInterface(
+            fields=['frequency']
+        ),
+        iterfield=['frequency'],
+        name='frequency'
+    )
 
     # === PHASE TO FREQUENCY ===
-    if run_args.qsm_algorithm in ['nextqsm', 'qsmjl']: 
+    if run_args.qsm_algorithm in ['nextqsm', 'qsmjl'] and run_args.unwrapping_algorithm not in ['romeob0']: 
         mn_phase_to_freq = MapNode(
             interface=qsmjl.PhaseToFreqInterface(), 
             name='qsmjl_phase-to-freq',
-            iterfield=['in_phase', 'in_TEs', 'in_b0str']
+            iterfield=['in_phase', 'in_TEs']
             # in_phase, in_mask, in_TEs, in_vsz, in_b0str, out_frequency
         )
         wf.connect([
@@ -65,7 +83,13 @@ def qsm_workflow(run_args, mn_inputs, name):
             (mn_inputs, mn_phase_to_freq, [('TE', 'in_TEs')]),
             (mn_inputs, mn_phase_to_freq, [('vsz', 'in_vsz')]),
             (mn_inputs, mn_phase_to_freq, [('B0_str', 'in_b0str')]),
+            (mn_phase_to_freq, mn_frequency, [('out_frequency', 'frequency')])
         ])
+    elif run_args.unwrapping_algorithm == 'romeob0':
+        wf.connect([
+            (mn_romeo, mn_frequency, [('out_file', 'frequency')]),
+        ])
+
 
     # === BACKGROUND FIELD REMOVAL ===
     if run_args.qsm_algorithm in ['qsmjl']:
@@ -75,8 +99,9 @@ def qsm_workflow(run_args, mn_inputs, name):
             name='qsmjl_vsharp'
             # in_frequency, in_mask, in_vsz, out_freq, out_mask
         )
+
         wf.connect([
-            (mn_phase_to_freq, mn_vsharp, [('out_frequency', 'in_frequency')]),
+            (mn_frequency, mn_vsharp, [('frequency', 'in_frequency')]),
             (mn_inputs, mn_vsharp, [('mask', 'in_mask')]),
             (mn_inputs, mn_vsharp, [('vsz', 'in_vsz')]),
             (mn_vsharp, mn_outputs, [('out_freq', 'tissue_frequency')])
@@ -92,7 +117,7 @@ def qsm_workflow(run_args, mn_inputs, name):
             # phase, mask, out_file
         )
         wf.connect([
-            (mn_phase_to_freq, n_qsm, [('out_frequency', 'phase')]),
+            (mn_frequency, n_qsm, [('frequency', 'phase')]),
             (mn_inputs, n_qsm, [('mask', 'mask')]),
             (n_qsm, mn_outputs, [('out_file', 'qsm')]),
         ])
@@ -120,7 +145,7 @@ def qsm_workflow(run_args, mn_inputs, name):
                 out_suffix='_tgvqsm',
                 extra_arguments='--ignore-orientation --no-resampling'
             ),
-            iterfield=['phase_file', 'TE', 'b0', 'mask_file'],
+            iterfield=['phase_file', 'TE', 'mask_file'],
             name='tgvqsm',
             mem_gb=6
             # inputs: 'phase_file', 'TE', 'b0', 'mask_file'
